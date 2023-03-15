@@ -31,7 +31,7 @@ words_to_integers = {word: integer + 1 for integer , word in enumerate(words)}
 words_to_integers['nigga'] = len(words_to_integers)
 words_to_integers['dinesh'] = len(words_to_integers)
 words_to_integers['.'] = 0
-integer_to_words = {integer: word for integer, word in words_to_integers.items()}
+integer_to_words = {word: integer for integer, word in words_to_integers.items()}
 
 """In this project I am taking three words to predict the next one. That means the block size would be three. I am 
 keeping it constant and not giving any flexibility to change as it is one of the core components of model and 
@@ -56,13 +56,13 @@ random.shuffle(lines)
 n1 = int(0.8*len(lines))
 n2 = int(0.9*len(lines))
 
-Xtrain , ytrain = build_datset(lines[:n1])
-Xval , yval = build_datset(lines[n1:n2])
-Xtest , ytest = build_datset(lines[n2:])
 
 #saving datasets
 if not os.path.exists('trainingData.pkl'):
     open('trainingData.pkl' , 'w')
+    Xtrain, ytrain = build_datset(lines[:n1])
+    Xval, yval = build_datset(lines[n1:n2])
+    Xtest, ytest = build_datset(lines[n2:])
     data = {}
     data['X_train'] = Xtrain
     data['y_train'] = ytrain
