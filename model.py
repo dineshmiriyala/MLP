@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 import os
 import random
+from tqdm import tqdm
 
 random.seed(9968)
 
@@ -30,18 +31,22 @@ def import_dataset():
 
 encode, decode = (import_dataset())['encode'], (import_dataset())['decode']
 
+
 class Neural_net():
     def __init__(self):
         self.prob = None
         self.gen = torch.Generator(device=device).manual_seed(9968)
         self.W1 = None
         self.W2 = None
-        self.B1 = None
         self.B2 = None
         self.loss_value = None
-        self.params()
+        self.BatchGain = None
+        self.BatchBias = None
+        self.Batchmean = None
+        self.Batchstd = None
         self.loss_counter, self.lr_counter = self.load_stats()
         self.lr = 0.1
+        self.params()
 
     def params(self):
         if not os.path.exists('data/params.pkl'):
@@ -51,77 +56,75 @@ class Neural_net():
                 params = pickle.load(file)
                 self.W1 = params['W1']
                 self.W2 = params['W2']
-                self.B1 = params['B1']
                 self.B2 = params['B2']
                 self.prob = params['prob']
+                self.loss_value = params['loss_value']
+                self.BatchBias = params['BatchBias']
+                self.BatchGain = params['BatchGain']
+                self.Batchmean = params['BatchMean']
+                self.Batchstd = params['BatchStd']
                 print("Model loaded successfully! \n")
-                print(f"Current loss: {params['loss_value']}")
+                print(f"Current loss: {params['loss_value']} \n")
             except EOFError:
                 print("Pre-trained model not found. Try training the model first. \n")
-                self.prob = torch.randn((len(encode), 60), generator=self.gen,
-                                        device=device, requires_grad=True)
-                self.W1 = torch.randn((180, 200), generator=self.gen,
-                                      device=device, requires_grad=True)
-                self.B1 = torch.randn(200, generator=self.gen,
-                                      device=device, requires_grad=True)
-                self.W2 = torch.randn((200, len(encode)), generator=self.gen,
-                                      device=device, requires_grad=True)
-                self.B2 = torch.randn(len(encode), generator=self.gen,
-                                      device=device, requires_grad=True)
+                self.prob = torch.randn((len(encode), 60), device=device, requires_grad=True)
+                self.W1 = torch.ones((180, 200), device=device, requires_grad=True)
+                self.W2 = torch.ones((200, len(encode)), device=device, requires_grad=True)
+                self.B2 = torch.zeros(len(encode), device=device, requires_grad=True)
+                self.BatchBias = torch.zeros((1, 200), device=device, requires_grad=True)
+                self.BatchGain = torch.ones((1, 200), device=device, requires_grad=True)
+                self.Batchmean = torch.zeros((1, 200), device=device, requires_grad=True)
+                self.Batchstd = torch.ones((1, 200), device=device, requires_grad=True)
                 print("Parameters Created.")
 
     def encode(self, word):
-
         return encode[word]
 
     def decode(self, integer):
         return decode[integer]
+
     def clear_params(self):
         """Clearing all the gradients."""
         self.prob.grad = None
-        self.B1.grad = None
         self.B2.grad = None
         self.W1.grad = None
         self.W2.grad = None
-
-    def backward(self):
-        self.clear_params()
-        self.loss_value.backward()
-
-    def forward(self, values):
-        return self.prob[values]
-
-    def hidden(self, embedded):
-        hidden = torch.tanh(embedded.view(-1, 180) @ self.W1 + self.B1)
-        logits = hidden @ self.W2 + self.B2
-        return logits
+        self.BatchGain.grad = None
+        self.BatchBias.grad = None
 
     def update(self, iteration):
-        self.lr = 0.1 if iteration < 100000 else 0.01
+        self.lr = 0.1 if iteration < 100 else 0.01
         self.prob.data += -self.lr * self.prob.grad
-        self.B1.data += -self.lr * self.B1.grad
         self.B2.data += -self.lr * self.B2.grad
         self.W1.data += -self.lr * self.W1.grad
         self.W2.data += -self.lr * self.W2.grad
+        self.BatchBias.data += -self.lr * self.BatchBias.grad
+        self.BatchGain.data += -self.lr * self.BatchGain.grad
 
     def train(self, iterations, X_train, y_train):
-        bar = iterations // 10
-        progress = 0
-        print("Progress: ", end = "")
-        for iteration in range(iterations):
-            #progress bar
-            if iteration % bar == 0:
-                print(f'{progress}%__', end = '')
-                progress += 10
+        for iteration in tqdm(range(iterations)):
             # mini batches construction
             index = torch.randint(0, X_train.shape[0], (128,))
             # forward pass
-            embedded = self.forward(X_train[index])
-            # hidden layer
-            logits = self.hidden(embedded)
+            emb = self.prob[X_train[index]]
+            # linear layer
+            embedded = emb.view(emb.shape[0], -1) @ self.W1
+            # batch norm layer
+            batchnorm_mean = embedded.mean(0, keepdim = True)
+            batchnorm_std = embedded.std(0, keepdim=True)
+            #print(type(self.BatchGain), type(embedded), type(batchnorm_mean))
+            hidden_preact = (self.BatchGain * (embedded - batchnorm_mean)) / (batchnorm_std + self.BatchBias)
+            #updating running batch parameters
+            with torch.no_grad():
+                self.Batchmean = 0.99*self.Batchmean + 0.01 * batchnorm_mean
+                self.Batchstd = 0.99*self.Batchstd + 0.01 * batchnorm_mean
+            # Non-linear layer
+            hidden = torch.tanh(hidden_preact)
+            logits = hidden @ self.W2 + self.B2
             self.loss_value = F.cross_entropy(logits, y_train[index])
             # backward pass
-            self.backward()
+            self.clear_params()
+            self.loss_value.backward()
             # update params
             self.update(iteration)
             self.loss_counter.append(self.loss_value.log10().item())
@@ -129,6 +132,8 @@ class Neural_net():
         self.save_model()
         self.save_stats()
         print(f"Current loss------> {self.loss_value}")
+        print("Graph for current loss")
+        self.graph(self.loss_counter)
 
     def generate(self, number):
         if self.loss_value < 10:
@@ -136,8 +141,14 @@ class Neural_net():
                 out = []
                 context = [0] * 3
                 while True:
-                    embedded = self.forward(torch.tensor([context]))
-                    logits = self.hidden(embedded)
+                    emb = self.prob[torch.tensor([context])]
+                    #linear layer
+                    embedded = emb.view(emb.shape[0], -1) @ self.W1
+                    #batch norm layer
+                    hidden_preact = (self.BatchGain * (embedded - self.Batchmean)) / (self.Batchstd + self.BatchBias)
+                    #non-linear layer
+                    hidden = torch.tanh(hidden_preact)
+                    logits = hidden @ self.W2 + self.B2
                     probability = F.softmax(logits, dim=1)
                     index = torch.multinomial(probability, num_samples=1).item()
                     context = context[1:] + [index]
@@ -147,44 +158,58 @@ class Neural_net():
                 print(' '.join(self.decode(integer) for integer in out))
         else:
             print("Model is not good enough to sample from.")
-            print(f"Current loss: {self.loss_value}\n")
+            print(f"Current loss: {self.loss_value}\n\n")
 
     def testing(self, X, y):
-        loss = []
-        for i in range(X.shape[0] // 256):
-            # mini batch construction
-            index = torch.randint(0, X.shape[0], (256,))
-            embedded = self.forward(X[index])
-            logits = self.hidden(embedded)
-            loss.append(F.cross_entropy(logits, y[index]))
-        print(f"The loss for given dataset is: {sum(loss) / len(loss)}")
+        with torch.no_grad():
+            loss = []
+            for i in tqdm(range(X.shape[0] // 256)):
+                # mini batch construction
+                index = torch.randint(0, X.shape[0], (256,))
+                emb = self.prob[X[index]]
+                #linear layer
+                embedded = emb.view(emb.shape[0], -1) @ self.W1
+                #batch norm layer
+                hidden_preact = (self.BatchGain * (embedded - self.Batchmean)) / (self.Batchstd + self.BatchBias)
+                #non-linear layer
+                hidden = torch.tanh(hidden_preact)
+                logits = hidden @ self.W2 + self.B2
+                loss.append(F.cross_entropy(logits, y[index]))
+            print(f"The loss for given dataset is: {sum(loss) / len(loss)}")
+            print("Graph for loss values in testing set: ")
+            self.graph(loss)
 
+    def graph(self, values):
+        plt.plot(values)
+        plt.title("loss values")
+        plt.xlabel('Iterations')
+        plt.ylabel('Loss')
+        plt.show()
     def save_model(self):
         if not os.path.exists('data/params.pkl'):
-            open('data/params.pkl' , 'w')
-        with open('data/params.pkl' , 'wb') as file:
-            params = {}
-            params['W1'] = self.W1
-            params['W2'] = self.W2
-            params['B1'] = self.B1
-            params['B2'] = self.B2
-            params['prob'] = self.prob
-            params['loss_value'] = self.loss_value
+            open('data/params.pkl', 'w')
+        with open('data/params.pkl', 'wb') as file:
+            params = {'W1': self.W1, 'W2': self.W2, 'B2': self.B2, 'prob': self.prob
+                , 'loss_value': self.loss_value, 'BatchGain': self.BatchGain,
+                      'BatchBias' : self.BatchBias, 'BatchMean': self.Batchmean,
+                      'BatchStd': self.Batchstd}
             pickle.dump(params, file)
             print("Model updated and saved successfully! \n")
 
     def save_stats(self):
         if not os.path.exists('data/stats.pkl'):
             open('data/stats.pkl', 'w')
-        data = {}
-        data['loss_values'] = self.loss_counter
-        data['lr'] = self.lr_counter
+        data = {'loss_values': self.loss_counter, 'lr': self.lr_counter}
         with open('data/stats.pkl', 'wb') as file:
             pickle.dump(data, file)
+
     def load_stats(self):
         if not os.path.exists('data/stats.pkl'):
             open('data/stats.pkl', 'w')
             return [], []
         with open('data/stats.pkl', 'rb') as file:
-            data = pickle.load(file)
-        return data['loss_values'], data['lr']
+            try:
+                data = pickle.load(file)
+                return data['loss_values'], data['lr']
+            except Exception:
+                return [], []
