@@ -1,5 +1,7 @@
 import os
 import pickle
+import sys
+
 from model import Neural_net
 print("---------------MLP model ----------------")
 print("-------Enter only numbers or float--------")
@@ -33,4 +35,4 @@ while True:
         model.generate(lines)
         user_input = int(input("\n\n\nSelect a option: \n 1: Train \n 2. Loss graph\n 3: Generate Text\n 4. END\n"))
     else:
-        break
+        sys.exit()

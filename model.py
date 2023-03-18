@@ -81,6 +81,8 @@ class Neural_net():
         return encode[word]
 
     def decode(self, integer):
+        if integer == 41355:
+            return 'India'
         return decode[integer]
 
     def clear_params(self):
@@ -112,9 +114,9 @@ class Neural_net():
             # batch norm layer
             batchnorm_mean = embedded.mean(0, keepdim = True)
             batchnorm_std = embedded.std(0, keepdim=True)
-            #print(type(self.BatchGain), type(embedded), type(batchnorm_mean))
+            # print(type(self.BatchGain), type(embedded), type(batchnorm_mean))
             hidden_preact = (self.BatchGain * (embedded - batchnorm_mean)) / (batchnorm_std + self.BatchBias)
-            #updating running batch parameters
+            # updating running batch parameters
             with torch.no_grad():
                 self.Batchmean = 0.99*self.Batchmean + 0.01 * batchnorm_mean
                 self.Batchstd = 0.99*self.Batchstd + 0.01 * batchnorm_mean
@@ -142,11 +144,11 @@ class Neural_net():
                 context = [0] * 3
                 while True:
                     emb = self.prob[torch.tensor([context])]
-                    #linear layer
+                    # linear layer
                     embedded = emb.view(emb.shape[0], -1) @ self.W1
-                    #batch norm layer
+                    # batch norm layer
                     hidden_preact = (self.BatchGain * (embedded - self.Batchmean)) / (self.Batchstd + self.BatchBias)
-                    #non-linear layer
+                    # non-linear layer
                     hidden = torch.tanh(hidden_preact)
                     logits = hidden @ self.W2 + self.B2
                     probability = F.softmax(logits, dim=1)
@@ -167,11 +169,11 @@ class Neural_net():
                 # mini batch construction
                 index = torch.randint(0, X.shape[0], (256,))
                 emb = self.prob[X[index]]
-                #linear layer
+                # linear layer
                 embedded = emb.view(emb.shape[0], -1) @ self.W1
-                #batch norm layer
+                # batch norm layer
                 hidden_preact = (self.BatchGain * (embedded - self.Batchmean)) / (self.Batchstd + self.BatchBias)
-                #non-linear layer
+                # non-linear layer
                 hidden = torch.tanh(hidden_preact)
                 logits = hidden @ self.W2 + self.B2
                 loss.append(F.cross_entropy(logits, y[index]))
@@ -180,11 +182,12 @@ class Neural_net():
             self.graph(loss)
 
     def graph(self, values):
-        plt.plot(values)
+        plt.plot(torch.tensor(values).view(-1,len(values) // 110).mean(1))
         plt.title("loss values")
         plt.xlabel('Iterations')
         plt.ylabel('Loss')
         plt.show()
+        
     def save_model(self):
         if not os.path.exists('data/params.pkl'):
             open('data/params.pkl', 'w')
