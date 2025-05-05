@@ -1,6 +1,19 @@
 import os
 import pickle
 import sys
+import subprocess
+import sys
+
+def install_if_missing(package):
+    try:
+        __import__(package)
+    except ImportError:
+        subprocess.check.call([sys.executable, "-m", "pip", "install", package])
+
+##check and install required packages
+install_if_missing("torch")
+install_if_missing("tqdm")
+install_if_missing("matplotlib")
 
 from model import Neural_net
 print("---------------MLP model ----------------")
